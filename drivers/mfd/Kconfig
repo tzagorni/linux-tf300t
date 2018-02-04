@@ -99,6 +99,37 @@ config MFD_AAT2870_CORE
 	  additional drivers must be enabled in order to use the
 	  functionality of the device.
 
+config MFD_ASUSEC
+	tristate "ASUS Transformer Pad embedded controller"
+	select MFD_CORE
+	depends on I2C=y
+	depends on GPIOLIB
+	depends on ARM
+	depends on OF
+	help
+	  Select this to get support for the embedded controller in ARM-based
+	  ASUS Transformer devices.
+	  This provides only support for the EC itself, keyboard and battery
+	  drivers can be selected under the corresponding menus.
+
+config KEYBOARD_ASUSEC
+	bool "Keyboard support for ASUS EC driver"
+	depends on MFD_ASUSEC
+	help
+	  Say Y here to include support for the ASUS EC Keyboards found in
+	  ARM-based ASUS Transformer devices.
+
+	  This will be part of the asusec module.
+
+config BATTERY_ASUSEC
+	bool "Battery support for ASUS EC driver"
+	depends on MFD_ASUSEC
+	help
+	  Say Y here to include support for the ASUS EC Keyboards found in
+	  ARM-based ASUS Transformer devices.
+
+	  This will be part of the asusec module.
+
 config MFD_ATMEL_FLEXCOM
 	tristate "Atmel Flexcom (Flexible Serial Communication Unit)"
 	select MFD_CORE
