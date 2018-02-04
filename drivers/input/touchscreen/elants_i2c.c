@@ -26,6 +26,7 @@
 
 #include <linux/module.h>
 #include <linux/input.h>
+#include <linux/input/touchscreen.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/platform_device.h>
@@ -70,7 +71,8 @@
 #define CMD_HEADER_REK		0x66
 
 /* FW position data */
-#define PACKET_SIZE		55
+#define PACKET_SIZE_OLD 	40
+#define PACKET_SIZE_NEW		55
 #define MAX_CONTACT_NUM		10
 #define FW_POS_HEADER		0
 #define FW_POS_STATE		1
@@ -133,10 +135,9 @@ struct elants_data {
 	u8 bc_version;
 	u8 iap_version;
 	u16 hw_version;
-	unsigned int x_res;	/* resolution in units/mm */
-	unsigned int y_res;
-	unsigned int x_max;
-	unsigned int y_max;
+	unsigned int phy_x;	/* physical size in mm */
+	unsigned int phy_y;
+	struct touchscreen_properties prop;
 
 	enum elants_state state;
 	enum elants_iap_mode iap_mode;
@@ -414,7 +415,7 @@ static int elants_i2c_query_ts_info(struct elants_data *ts)
 	struct i2c_client *client = ts->client;
 	int error;
 	u8 resp[17];
-	u16 phy_x, phy_y, rows, cols, osr;
+	u16 rows, cols, osr;
 	const u8 get_resolution_cmd[] = {
 		CMD_HEADER_6B_READ, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
@@ -464,7 +465,7 @@ static int elants_i2c_query_ts_info(struct elants_data *ts)
 		return error;
 	}
 
-	phy_x = get_unaligned_be16(&resp[2]);
+	ts->phy_x = get_unaligned_be16(&resp[2]);
 
 	error = elants_i2c_execute_command(client,
 					   get_physical_drive_cmd,
@@ -476,9 +477,9 @@ static int elants_i2c_query_ts_info(struct elants_data *ts)
 		return error;
 	}
 
-	phy_y = get_unaligned_be16(&resp[2]);
+	ts->phy_y = get_unaligned_be16(&resp[2]);
 
-	dev_dbg(&client->dev, "phy_x=%d, phy_y=%d\n", phy_x, phy_y);
+	dev_dbg(&client->dev, "phy_x=%d, phy_y=%d\n", ts->phy_x, ts->phy_y);
 
 	if (rows == 0 || cols == 0 || osr == 0) {
 		dev_warn(&client->dev,
@@ -486,10 +487,8 @@ static int elants_i2c_query_ts_info(struct elants_data *ts)
 			 rows, cols, osr);
 	} else {
 		/* translate trace number to TS resolution */
-		ts->x_max = ELAN_TS_RESOLUTION(rows, osr);
-		ts->x_res = DIV_ROUND_CLOSEST(ts->x_max, phy_x);
-		ts->y_max = ELAN_TS_RESOLUTION(cols, osr);
-		ts->y_res = DIV_ROUND_CLOSEST(ts->y_max, phy_y);
+		ts->prop.max_x = ELAN_TS_RESOLUTION(rows, osr);
+		ts->prop.max_y = ELAN_TS_RESOLUTION(cols, osr);
 	}
 
 	return 0;
@@ -781,7 +780,7 @@ out:
  * Event reporting.
  */
 
-static void elants_i2c_mt_event(struct elants_data *ts, u8 *buf)
+static void elants_i2c_mt_event(struct elants_data *ts, u8 *buf, bool old_format)
 {
 	struct input_dev *input = ts->input;
 	unsigned int n_fingers;
@@ -803,16 +802,22 @@ static void elants_i2c_mt_event(struct elants_data *ts, u8 *buf)
 			pos = &buf[FW_POS_XY + i * 3];
 			x = (((u16)pos[0] & 0xf0) << 4) | pos[1];
 			y = (((u16)pos[0] & 0x0f) << 8) | pos[2];
-			p = buf[FW_POS_PRESSURE + i];
-			w = buf[FW_POS_WIDTH + i];
+			if (old_format) {
+				p = w = ((buf[FW_POS_WIDTH + i / 2]
+					<< ((i % 2) * 4)) & 0xf0) | 0x0f;
+			} else {
+				p = buf[FW_POS_PRESSURE + i];
+				w = buf[FW_POS_WIDTH + i];
+			}
 
 			dev_dbg(&ts->client->dev, "i=%d x=%d y=%d p=%d w=%d\n",
 				i, x, y, p, w);
 
+
+
 			input_mt_slot(input, i);
 			input_mt_report_slot_state(input, MT_TOOL_FINGER, true);
-			input_event(input, EV_ABS, ABS_MT_POSITION_X, x);
-			input_event(input, EV_ABS, ABS_MT_POSITION_Y, y);
+			touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
 			input_event(input, EV_ABS, ABS_MT_PRESSURE, p);
 			input_event(input, EV_ABS, ABS_MT_TOUCH_MAJOR, w);
 
@@ -837,7 +842,7 @@ static u8 elants_i2c_calculate_checksum(u8 *buf)
 	return checksum;
 }
 
-static void elants_i2c_event(struct elants_data *ts, u8 *buf)
+static void elants_i2c_event(struct elants_data *ts, u8 *buf, bool old_format)
 {
 	u8 checksum = elants_i2c_calculate_checksum(buf);
 
@@ -851,7 +856,7 @@ static void elants_i2c_event(struct elants_data *ts, u8 *buf)
 			 "%s: unknown packet type: %02x\n",
 			 __func__, buf[FW_POS_HEADER]);
 	else
-		elants_i2c_mt_event(ts, buf);
+		elants_i2c_mt_event(ts, buf, old_format);
 }
 
 static irqreturn_t elants_i2c_irq(int irq, void *_dev)
@@ -859,6 +864,7 @@ static irqreturn_t elants_i2c_irq(int irq, void *_dev)
 	const u8 wait_packet[] = { 0x64, 0x64, 0x64, 0x64 };
 	struct elants_data *ts = _dev;
 	struct i2c_client *client = ts->client;
+	bool report_old_format;
 	int report_count, report_len;
 	int i;
 	int len;
@@ -909,7 +915,7 @@ static irqreturn_t elants_i2c_irq(int irq, void *_dev)
 			break;
 
 		case QUEUE_HEADER_SINGLE:
-			elants_i2c_event(ts, &ts->buf[HEADER_SIZE]);
+			elants_i2c_event(ts, &ts->buf[HEADER_SIZE], false);
 			break;
 
 		case QUEUE_HEADER_NORMAL:
@@ -922,7 +928,12 @@ static irqreturn_t elants_i2c_irq(int irq, void *_dev)
 			}
 
 			report_len = ts->buf[FW_HDR_LENGTH] / report_count;
-			if (report_len != PACKET_SIZE) {
+
+			if (report_len == PACKET_SIZE_NEW) {
+				report_old_format = false;
+			} else if (report_len == PACKET_SIZE_OLD) {
+				report_old_format = true;
+			} else {
 				dev_err(&client->dev,
 					"mismatching report length: %*ph\n",
 					HEADER_SIZE, ts->buf);
@@ -931,8 +942,8 @@ static irqreturn_t elants_i2c_irq(int irq, void *_dev)
 
 			for (i = 0; i < report_count; i++) {
 				u8 *buf = ts->buf + HEADER_SIZE +
-							i * PACKET_SIZE;
-				elants_i2c_event(ts, buf);
+							i * report_len;
+				elants_i2c_event(ts, buf, report_old_format);
 			}
 			break;
 
@@ -1137,6 +1148,7 @@ static int elants_i2c_probe(struct i2c_client *client,
 	union i2c_smbus_data dummy;
 	struct elants_data *ts;
 	unsigned long irqflags;
+	unsigned int x_res, y_res;
 	int error;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1230,13 +1242,6 @@ static int elants_i2c_probe(struct i2c_client *client,
 	__set_bit(EV_ABS, ts->input->evbit);
 	__set_bit(EV_KEY, ts->input->evbit);
 
-	/* Single touch input params setup */
-	input_set_abs_params(ts->input, ABS_X, 0, ts->x_max, 0, 0);
-	input_set_abs_params(ts->input, ABS_Y, 0, ts->y_max, 0, 0);
-	input_set_abs_params(ts->input, ABS_PRESSURE, 0, 255, 0, 0);
-	input_abs_set_res(ts->input, ABS_X, ts->x_res);
-	input_abs_set_res(ts->input, ABS_Y, ts->y_res);
-
 	/* Multitouch input params setup */
 	error = input_mt_init_slots(ts->input, MAX_CONTACT_NUM,
 				    INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
@@ -1246,12 +1251,34 @@ static int elants_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, ts->x_max, 0, 0);
-	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, ts->y_max, 0, 0);
+	input_alloc_absinfo(ts->input);
+	if (!ts->input->absinfo)
+		return -ENOMEM;
+
+	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, ts->prop.max_x, 0, 0);
+	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, ts->prop.max_y, 0, 0);
+
+	/* DT may override some parameters */
+	dev_err(&client->dev, "Old Touchscreen max_x: %u, max_y: %u\n", ts->prop.max_x, ts->prop.max_y);
+	touchscreen_parse_properties(ts->input, true, &ts->prop);
+	dev_err(&client->dev, "Touchscreen max_x: %u, max_y: %u\n", ts->prop.max_x, ts->prop.max_y);
+
+	x_res = DIV_ROUND_CLOSEST(ts->prop.max_x, ts->phy_x);
+	y_res = DIV_ROUND_CLOSEST(ts->prop.max_y, ts->phy_y);
+
+	/* Single touch input params setup */
+	input_set_abs_params(ts->input, ABS_X, 0, ts->prop.max_x, 0, 0);
+	input_set_abs_params(ts->input, ABS_Y, 0, ts->prop.max_y, 0, 0);
+	input_set_abs_params(ts->input, ABS_PRESSURE, 0, 255, 0, 0);
+	input_abs_set_res(ts->input, ABS_X, x_res);
+	input_abs_set_res(ts->input, ABS_Y, y_res);
+
+	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, ts->prop.max_x, 0, 0);
+	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, ts->prop.max_y, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_PRESSURE, 0, 255, 0, 0);
-	input_abs_set_res(ts->input, ABS_MT_POSITION_X, ts->x_res);
-	input_abs_set_res(ts->input, ABS_MT_POSITION_Y, ts->y_res);
+	input_abs_set_res(ts->input, ABS_MT_POSITION_X, x_res);
+	input_abs_set_res(ts->input, ABS_MT_POSITION_Y, y_res);
 
 	error = input_register_device(ts->input);
 	if (error) {
