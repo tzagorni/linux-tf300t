@@ -29,6 +29,7 @@
 #include <asm/cacheflush.h>
 #include <asm/cp15.h>
 #include <asm/cputype.h>
+#include <asm/firmware.h>
 #include <asm/hardware/cache-l2x0.h>
 #include "cache-tauros3.h"
 #include "cache-aurora-l2.h"
@@ -1352,6 +1353,55 @@ static const struct l2c_init_data of_l2c310_coherent_data __initconst = {
 	},
 };
 
+#ifdef CONFIG_TRUSTED_FOUNDATIONS
+static void l2c310_nonsecure_write_sec(unsigned long val, unsigned reg)
+{
+	if (val != readl_relaxed(l2x0_base + reg))
+		pr_err("L2C-310 Non-Secure: secure write requested\n");
+}
+
+static void __init l2c310_nonsecure_enable(void __iomem *base, unsigned num_lock)
+{
+	/* init L2 from secureos */
+	call_firmware_op(l2x0_init);
+}
+
+static void l2c310_nonsecure_resume(void)
+{
+	/* reenable L2 in secureos */
+	u32 aux = readl_relaxed(l2x0_base + L2X0_AUX_CTRL);
+	call_firmware_op(l2x0_resume, aux);
+}
+
+static void l2c310_nonsecure_disable(void)
+{
+	/* ask secureos to fully flush and disable the L2 */
+	call_firmware_op(l2x0_disable, l2x0_way_mask);
+}
+
+static const struct l2c_init_data of_l2c310_nonsecure_data __initconst = {
+	.type = "L2C-310 Non-Secure",
+	.way_size_0 = SZ_8K,
+	.num_lock = 8,
+	.of_parse = l2c310_of_parse,
+	.enable = l2c310_nonsecure_enable,
+	.fixup = l2c310_fixup,
+	.save  = l2c310_save,
+	/*.configure = l2c310_configure,
+	.unlock = l2c310_unlock,*/
+	.outer_cache = {
+		.inv_range   = l2c210_inv_range,
+		.clean_range = l2c210_clean_range,
+		.flush_range = l2c210_flush_range,
+		.flush_all   = l2c210_flush_all,
+		.disable     = l2c310_nonsecure_disable,
+		.sync        = l2c210_sync,
+		.resume      = l2c310_nonsecure_resume,
+		.write_sec   = l2c310_nonsecure_write_sec,
+	},
+};
+#endif
+
 /*
  * Note that the end addresses passed to Linux primitives are
  * noninclusive, while the hardware cache range operations use
@@ -1741,6 +1791,9 @@ static const struct of_device_id l2x0_ids[] __initconst = {
 	L2C_ID("arm,l210-cache", of_l2c210_data),
 	L2C_ID("arm,l220-cache", of_l2c220_data),
 	L2C_ID("arm,pl310-cache", of_l2c310_data),
+#ifdef CONFIG_TRUSTED_FOUNDATIONS
+	L2C_ID("arm,pl310-cache-nonsecure", of_l2c310_nonsecure_data),
+#endif
 	L2C_ID("brcm,bcm11351-a2-pl310-cache", of_bcm_l2x0_data),
 	L2C_ID("marvell,aurora-outer-cache", of_aurora_with_outer_data),
 	L2C_ID("marvell,aurora-system-cache", of_aurora_no_outer_data),
