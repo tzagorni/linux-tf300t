@@ -144,8 +144,10 @@ t30_check:
 t30_errata:
 	# Tegra30 is a Cortex-A9 r2p9
 	mrc	p15, 0, r0, c15, c0, 1  @ read diagnostic register
-	orr	r0, r0, #1 << 6         @ erratum 743622
-	orr	r0, r0, #1 << 11        @ erratum 751472
+	orr	r1, r0, #1 << 6         @ erratum 743622
+	orr	r1, r1, #1 << 11        @ erratum 751472
+	cmp	r1, r0
+	beq	after_errata
 	mcr	p15, 0, r0, c15, c0, 1  @ write diagnostic register
 	b	after_errata
 after_t30_check:
