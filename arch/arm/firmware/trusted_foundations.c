@@ -29,6 +29,12 @@
 #define TF_CPU_PM_S1		0xffffffe4
 #define TF_CPU_PM_S1_NOFLUSH_L2	0xffffffe7
 
+#define TF_L2X0			0xfffff100
+
+#define TF_L2X0_INIT		0x00000001
+#define TF_L2X0_RESUME		0x00000004
+#define TF_L2X0_DISABLE		0x00000002
+
 static unsigned long cpu_boot_addr;
 
 static void __naked tf_generic_smc(u32 type, u32 arg1, u32 arg2)
@@ -63,9 +69,33 @@ static int tf_prepare_idle(void)
 	return 0;
 }
 
+static int tf_l2x0_init(void)
+{
+	tf_generic_smc(TF_L2X0, TF_L2X0_INIT, 0);
+
+	return 0;
+}
+
+static int tf_l2x0_resume(u32 aux)
+{
+	tf_generic_smc(TF_L2X0, TF_L2X0_RESUME, aux);
+
+	return 0;
+}
+
+static int tf_l2x0_disable(u32 way_mask)
+{
+	tf_generic_smc(TF_L2X0, TF_L2X0_DISABLE, way_mask);
+
+	return 0;
+}
+
 static const struct firmware_ops trusted_foundations_ops = {
 	.set_cpu_boot_addr = tf_set_cpu_boot_addr,
 	.prepare_idle = tf_prepare_idle,
+	.l2x0_init = tf_l2x0_init,
+	.l2x0_resume = tf_l2x0_resume,
+	.l2x0_disable = tf_l2x0_disable,
 };
 
 void register_trusted_foundations(struct trusted_foundations_platform_data *pd)

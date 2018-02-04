@@ -46,6 +46,14 @@ struct firmware_ops {
 	 */
 	int (*l2x0_init)(void);
 	/*
+	 * Re-enables L2 cache
+	 */
+	int (*l2x0_resume)(u32 aux);
+	/*
+	 * Flushes and disables L2 cache
+	 */
+	int (*l2x0_disable)(u32 way_mask);
+	/*
 	 * Enter system-wide suspend.
 	 */
 	int (*suspend)(void);
