@@ -963,6 +963,18 @@ static const struct panel_desc hannstar_hsd070pww1 = {
 	.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
 };
 
+static const struct panel_desc hannstar_hsd101pww1 = {
+	/* Same timings as above, just different size */
+	.timings = &hannstar_hsd070pww1_timing,
+	.num_timings = 1,
+	.bpc = 6,
+	.size = {
+		.width = 217,
+		.height = 136,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
+};
+
 static const struct display_timing hannstar_hsd100pxn1_timing = {
 	.pixelclock = { 55000000, 65000000, 75000000 },
 	.hactive = { 1024, 1024, 1024 },
@@ -2092,6 +2104,9 @@ static const struct of_device_id platform_of_match[] = {
 		.data = &giantplus_gpg482739qs5
 	}, {
 		.compatible = "hannstar,hsd070pww1",
+		.data = &hannstar_hsd070pww1,
+	}, {
+		.compatible = "hannstar,hsd101pww1",
 		.data = &hannstar_hsd070pww1,
 	}, {
 		.compatible = "hannstar,hsd100pxn1",
