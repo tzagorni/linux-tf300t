@@ -230,3 +230,6 @@ obj-$(CONFIG_MFD_SC27XX_PMIC)	+= sprd-sc27xx-spi.o
 obj-$(CONFIG_RAVE_SP_CORE)	+= rave-sp.o
 
 asusec-objs			:= asusec-core.o
+asusec-$(CONFIG_KEYBOARD_ASUSEC)	+= asusec-keyboard.o
+asusec-$(CONFIG_BATTERY_ASUSEC)	+= asusec-battery.o
+obj-$(CONFIG_MFD_ASUSEC)	+= asusec.o
