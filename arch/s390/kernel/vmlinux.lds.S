@@ -19,7 +19,7 @@
 
 OUTPUT_FORMAT("elf64-s390", "elf64-s390", "elf64-s390")
 OUTPUT_ARCH(s390:64-bit)
-ENTRY(startup)
+ENTRY(startup_continue)
 jiffies = jiffies_64;
 
 PHDRS {
@@ -30,16 +30,12 @@ PHDRS {
 
 SECTIONS
 {
-	. = 0x00000000;
+	. = 0x100000;
+	_stext = .;		/* Start of text section */
 	.text : {
 		/* Text and read-only data */
+		_text = .;
 		HEAD_TEXT
-		/*
-		 * E.g. perf doesn't like symbols starting at address zero,
-		 * therefore skip the initial PSW and channel program located
-		 * at address zero and let _text start at 0x200.
-		 */
-	_text = 0x200;
 		TEXT_TEXT
 		SCHED_TEXT
 		CPUIDLE_TEXT
@@ -47,6 +43,7 @@ SECTIONS
 		KPROBES_TEXT
 		IRQENTRY_TEXT
 		SOFTIRQENTRY_TEXT
+		*(.text.*_indirect_*)
 		*(.fixup)
 		*(.gnu.warning)
 	} :text = 0x0700
@@ -82,10 +79,10 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	.init.text : AT(ADDR(.init.text) - LOAD_OFFSET) {
-		VMLINUX_SYMBOL(_sinittext) = . ;
+		_sinittext = .;
 		INIT_TEXT
 		. = ALIGN(PAGE_SIZE);
-		VMLINUX_SYMBOL(_einittext) = . ;
+		_einittext = .;
 	}
 
 	/*
@@ -121,6 +118,20 @@ SECTIONS
 	 */
 	.altinstr_replacement : {
 		*(.altinstr_replacement)
+	}
+
+	/*
+	 * Table with the patch locations to undo expolines
+	*/
+	.nospec_call_table : {
+		__nospec_call_start = . ;
+		*(.s390_indirect*)
+		__nospec_call_end = . ;
+	}
+	.nospec_return_table : {
+		__nospec_return_start = . ;
+		*(.s390_return*)
+		__nospec_return_end = . ;
 	}
 
 	/* early.c uses stsi, which requires page aligned data. */

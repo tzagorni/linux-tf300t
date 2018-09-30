@@ -596,11 +596,18 @@ static enum hrtimer_restart qdisc_watchdog(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-void qdisc_watchdog_init(struct qdisc_watchdog *wd, struct Qdisc *qdisc)
+void qdisc_watchdog_init_clockid(struct qdisc_watchdog *wd, struct Qdisc *qdisc,
+				 clockid_t clockid)
 {
-	hrtimer_init(&wd->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED);
+	hrtimer_init(&wd->timer, clockid, HRTIMER_MODE_ABS_PINNED);
 	wd->timer.function = qdisc_watchdog;
 	wd->qdisc = qdisc;
+}
+EXPORT_SYMBOL(qdisc_watchdog_init_clockid);
+
+void qdisc_watchdog_init(struct qdisc_watchdog *wd, struct Qdisc *qdisc)
+{
+	qdisc_watchdog_init_clockid(wd, qdisc, CLOCK_MONOTONIC);
 }
 EXPORT_SYMBOL(qdisc_watchdog_init);
 
@@ -739,6 +746,7 @@ static u32 qdisc_alloc_handle(struct net_device *dev)
 void qdisc_tree_reduce_backlog(struct Qdisc *sch, unsigned int n,
 			       unsigned int len)
 {
+	bool qdisc_is_offloaded = sch->flags & TCQ_F_OFFLOADED;
 	const struct Qdisc_class_ops *cops;
 	unsigned long cl;
 	u32 parentid;
@@ -760,8 +768,12 @@ void qdisc_tree_reduce_backlog(struct Qdisc *sch, unsigned int n,
 		 * If child was empty even before update then backlog
 		 * counter is screwed and we skip notification because
 		 * parent class is already passive.
+		 *
+		 * If the original child was offloaded then it is allowed
+		 * to be seem as empty, so the parent is notified anyway.
 		 */
-		notify = !sch->q.qlen && !WARN_ON_ONCE(!n);
+		notify = !sch->q.qlen && !WARN_ON_ONCE(!n &&
+						       !qdisc_is_offloaded);
 		/* TODO: perform the search on a per txq basis */
 		sch = qdisc_lookup(qdisc_dev(sch), TC_H_MAJ(parentid));
 		if (sch == NULL) {
@@ -2087,23 +2099,11 @@ static int psched_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int psched_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, psched_show, NULL);
-}
-
-static const struct file_operations psched_fops = {
-	.open = psched_open,
-	.read  = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-
 static int __net_init psched_net_init(struct net *net)
 {
 	struct proc_dir_entry *e;
 
-	e = proc_create("psched", 0, net->proc_net, &psched_fops);
+	e = proc_create_single("psched", 0, net->proc_net, psched_show);
 	if (e == NULL)
 		return -ENOMEM;
 

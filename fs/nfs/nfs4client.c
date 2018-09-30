@@ -156,9 +156,23 @@ nfs4_shutdown_ds_clients(struct nfs_client *clp)
 	}
 }
 
+static void
+nfs4_cleanup_callback(struct nfs_client *clp)
+{
+	struct nfs4_copy_state *cp_state;
+
+	while (!list_empty(&clp->pending_cb_stateids)) {
+		cp_state = list_entry(clp->pending_cb_stateids.next,
+					struct nfs4_copy_state, copies);
+		list_del(&cp_state->copies);
+		kfree(cp_state);
+	}
+}
+
 void nfs41_shutdown_client(struct nfs_client *clp)
 {
 	if (nfs4_has_session(clp)) {
+		nfs4_cleanup_callback(clp);
 		nfs4_shutdown_ds_clients(clp);
 		nfs4_destroy_session(clp->cl_session);
 		nfs4_destroy_clientid(clp);
@@ -202,6 +216,7 @@ struct nfs_client *nfs4_alloc_client(const struct nfs_client_initdata *cl_init)
 #if IS_ENABLED(CONFIG_NFS_V4_1)
 	init_waitqueue_head(&clp->cl_lock_waitq);
 #endif
+	INIT_LIST_HEAD(&clp->pending_cb_stateids);
 	return clp;
 
 error:
@@ -868,8 +883,10 @@ static int nfs4_set_client(struct nfs_server *server,
 	if (IS_ERR(clp))
 		return PTR_ERR(clp);
 
-	if (server->nfs_client == clp)
+	if (server->nfs_client == clp) {
+		nfs_put_client(clp);
 		return -ELOOP;
+	}
 
 	/*
 	 * Query for the lease time on clientid setup or renewal
@@ -1125,7 +1142,7 @@ struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *data,
 	nfs_server_copy_userdata(server, parent_server);
 
 	/* Get a client representation */
-#ifdef CONFIG_SUNRPC_XPRT_RDMA
+#if IS_ENABLED(CONFIG_SUNRPC_XPRT_RDMA)
 	rpc_set_port(data->addr, NFS_RDMA_PORT);
 	error = nfs4_set_client(server, data->hostname,
 				data->addr,
@@ -1137,7 +1154,7 @@ struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *data,
 				parent_client->cl_net);
 	if (!error)
 		goto init_server;
-#endif	/* CONFIG_SUNRPC_XPRT_RDMA */
+#endif	/* IS_ENABLED(CONFIG_SUNRPC_XPRT_RDMA) */
 
 	rpc_set_port(data->addr, NFS_PORT);
 	error = nfs4_set_client(server, data->hostname,
@@ -1151,7 +1168,7 @@ struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *data,
 	if (error < 0)
 		goto error;
 
-#ifdef CONFIG_SUNRPC_XPRT_RDMA
+#if IS_ENABLED(CONFIG_SUNRPC_XPRT_RDMA)
 init_server:
 #endif
 	error = nfs_init_server_rpcclient(server, parent_server->client->cl_timeout, data->authflavor);
@@ -1244,11 +1261,11 @@ int nfs4_update_server(struct nfs_server *server, const char *hostname,
 				clp->cl_proto, clnt->cl_timeout,
 				clp->cl_minorversion, net);
 	clear_bit(NFS_MIG_TSM_POSSIBLE, &server->mig_status);
-	nfs_put_client(clp);
 	if (error != 0) {
 		nfs_server_insert_lists(server);
 		return error;
 	}
+	nfs_put_client(clp);
 
 	if (server->nfs_client->cl_hostname == NULL)
 		server->nfs_client->cl_hostname = kstrdup(hostname, GFP_KERNEL);

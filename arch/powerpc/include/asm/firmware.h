@@ -14,8 +14,7 @@
 
 #ifdef __KERNEL__
 
-#include <asm/asm-compat.h>
-#include <asm/feature-fixups.h>
+#include <asm/asm-const.h>
 
 /* firmware feature bitmask values */
 
@@ -52,7 +51,7 @@
 #define FW_FEATURE_TYPE1_AFFINITY ASM_CONST(0x0000000100000000)
 #define FW_FEATURE_PRRN		ASM_CONST(0x0000000200000000)
 #define FW_FEATURE_DRMEM_V2	ASM_CONST(0x0000000400000000)
-#define FW_FEATURE_DRC_INFO	ASM_CONST(0x0000000400000000)
+#define FW_FEATURE_DRC_INFO	ASM_CONST(0x0000000800000000)
 
 #ifndef __ASSEMBLY__
 

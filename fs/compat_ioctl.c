@@ -38,8 +38,6 @@
 #include <linux/ppp-ioctl.h>
 #include <linux/if_pppox.h>
 #include <linux/mtio.h>
-#include <linux/auto_fs.h>
-#include <linux/auto_fs4.h>
 #include <linux/tty.h>
 #include <linux/vt_kern.h>
 #include <linux/fb.h>
@@ -192,34 +190,6 @@ static int do_video_stillpicture(struct file *file,
 
 	err =  put_user(compat_ptr(fp), &up_native->iFrame);
 	err |= put_user(size, &up_native->size);
-	if (err)
-		return -EFAULT;
-
-	err = do_ioctl(file, cmd, (unsigned long) up_native);
-
-	return err;
-}
-
-struct compat_video_spu_palette {
-	int length;
-	compat_uptr_t palette;
-};
-
-static int do_video_set_spu_palette(struct file *file,
-		unsigned int cmd, struct compat_video_spu_palette __user *up)
-{
-	struct video_spu_palette __user *up_native;
-	compat_uptr_t palp;
-	int length, err;
-
-	err  = get_user(palp, &up->palette);
-	err |= get_user(length, &up->length);
-	if (err)
-		return -EFAULT;
-
-	up_native = compat_alloc_user_space(sizeof(struct video_spu_palette));
-	err  = put_user(compat_ptr(palp), &up_native->palette);
-	err |= put_user(length, &up_native->length);
 	if (err)
 		return -EFAULT;
 
@@ -1208,9 +1178,6 @@ COMPATIBLE_IOCTL(AUDIO_CLEAR_BUFFER)
 COMPATIBLE_IOCTL(AUDIO_SET_ID)
 COMPATIBLE_IOCTL(AUDIO_SET_MIXER)
 COMPATIBLE_IOCTL(AUDIO_SET_STREAMTYPE)
-COMPATIBLE_IOCTL(AUDIO_SET_EXT_ID)
-COMPATIBLE_IOCTL(AUDIO_SET_ATTRIBUTES)
-COMPATIBLE_IOCTL(AUDIO_SET_KARAOKE)
 COMPATIBLE_IOCTL(DMX_START)
 COMPATIBLE_IOCTL(DMX_STOP)
 COMPATIBLE_IOCTL(DMX_SET_FILTER)
@@ -1218,23 +1185,11 @@ COMPATIBLE_IOCTL(DMX_SET_PES_FILTER)
 COMPATIBLE_IOCTL(DMX_SET_BUFFER_SIZE)
 COMPATIBLE_IOCTL(DMX_GET_PES_PIDS)
 COMPATIBLE_IOCTL(DMX_GET_STC)
-COMPATIBLE_IOCTL(FE_GET_INFO)
-COMPATIBLE_IOCTL(FE_DISEQC_RESET_OVERLOAD)
-COMPATIBLE_IOCTL(FE_DISEQC_SEND_MASTER_CMD)
-COMPATIBLE_IOCTL(FE_DISEQC_RECV_SLAVE_REPLY)
-COMPATIBLE_IOCTL(FE_DISEQC_SEND_BURST)
-COMPATIBLE_IOCTL(FE_SET_TONE)
-COMPATIBLE_IOCTL(FE_SET_VOLTAGE)
-COMPATIBLE_IOCTL(FE_ENABLE_HIGH_LNB_VOLTAGE)
-COMPATIBLE_IOCTL(FE_READ_STATUS)
-COMPATIBLE_IOCTL(FE_READ_BER)
-COMPATIBLE_IOCTL(FE_READ_SIGNAL_STRENGTH)
-COMPATIBLE_IOCTL(FE_READ_SNR)
-COMPATIBLE_IOCTL(FE_READ_UNCORRECTED_BLOCKS)
-COMPATIBLE_IOCTL(FE_SET_FRONTEND)
-COMPATIBLE_IOCTL(FE_GET_FRONTEND)
-COMPATIBLE_IOCTL(FE_GET_EVENT)
-COMPATIBLE_IOCTL(FE_DISHNETWORK_SEND_LEGACY_CMD)
+COMPATIBLE_IOCTL(DMX_REQBUFS)
+COMPATIBLE_IOCTL(DMX_QUERYBUF)
+COMPATIBLE_IOCTL(DMX_EXPBUF)
+COMPATIBLE_IOCTL(DMX_QBUF)
+COMPATIBLE_IOCTL(DMX_DQBUF)
 COMPATIBLE_IOCTL(VIDEO_STOP)
 COMPATIBLE_IOCTL(VIDEO_PLAY)
 COMPATIBLE_IOCTL(VIDEO_FREEZE)
@@ -1247,16 +1202,9 @@ COMPATIBLE_IOCTL(VIDEO_FAST_FORWARD)
 COMPATIBLE_IOCTL(VIDEO_SLOWMOTION)
 COMPATIBLE_IOCTL(VIDEO_GET_CAPABILITIES)
 COMPATIBLE_IOCTL(VIDEO_CLEAR_BUFFER)
-COMPATIBLE_IOCTL(VIDEO_SET_ID)
 COMPATIBLE_IOCTL(VIDEO_SET_STREAMTYPE)
 COMPATIBLE_IOCTL(VIDEO_SET_FORMAT)
-COMPATIBLE_IOCTL(VIDEO_SET_SYSTEM)
-COMPATIBLE_IOCTL(VIDEO_SET_HIGHLIGHT)
-COMPATIBLE_IOCTL(VIDEO_SET_SPU)
-COMPATIBLE_IOCTL(VIDEO_GET_NAVI)
-COMPATIBLE_IOCTL(VIDEO_SET_ATTRIBUTES)
 COMPATIBLE_IOCTL(VIDEO_GET_SIZE)
-COMPATIBLE_IOCTL(VIDEO_GET_FRAME_RATE)
 /* cec */
 COMPATIBLE_IOCTL(CEC_ADAP_G_CAPS)
 COMPATIBLE_IOCTL(CEC_ADAP_G_LOG_ADDRS)
@@ -1361,8 +1309,6 @@ static long do_ioctl_trans(unsigned int cmd,
 		return do_video_get_event(file, cmd, argp);
 	case VIDEO_STILLPICTURE:
 		return do_video_stillpicture(file, cmd, argp);
-	case VIDEO_SET_SPU_PALETTE:
-		return do_video_set_spu_palette(file, cmd, argp);
 	}
 
 	/*

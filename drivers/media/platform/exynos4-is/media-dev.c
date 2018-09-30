@@ -456,7 +456,7 @@ static int fimc_md_parse_port_node(struct fimc_md *fmd,
 	}
 
 	fmd->sensor[index].asd.match_type = V4L2_ASYNC_MATCH_FWNODE;
-	fmd->sensor[index].asd.match.fwnode.fwnode = of_fwnode_handle(rem);
+	fmd->sensor[index].asd.match.fwnode = of_fwnode_handle(rem);
 	fmd->async_subdevs[index] = &fmd->sensor[index].asd;
 
 	fmd->num_sensors++;
@@ -1201,8 +1201,7 @@ static const struct media_device_ops fimc_md_ops = {
 static ssize_t fimc_md_sysfs_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct fimc_md *fmd = platform_get_drvdata(pdev);
+	struct fimc_md *fmd = dev_get_drvdata(dev);
 
 	if (fmd->user_subdev_api)
 		return strlcpy(buf, "Sub-device API (sub-dev)\n", PAGE_SIZE);
@@ -1214,8 +1213,7 @@ static ssize_t fimc_md_sysfs_store(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf, size_t count)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct fimc_md *fmd = platform_get_drvdata(pdev);
+	struct fimc_md *fmd = dev_get_drvdata(dev);
 	bool subdev_api;
 	int i;
 
@@ -1364,7 +1362,7 @@ static int subdev_notifier_bound(struct v4l2_async_notifier *notifier,
 
 	/* Find platform data for this sensor subdev */
 	for (i = 0; i < ARRAY_SIZE(fmd->sensor); i++)
-		if (fmd->sensor[i].asd.match.fwnode.fwnode ==
+		if (fmd->sensor[i].asd.match.fwnode ==
 		    of_fwnode_handle(subdev->dev->of_node))
 			si = &fmd->sensor[i];
 

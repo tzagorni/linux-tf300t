@@ -335,7 +335,7 @@ send_first:
 		if (test_and_clear_bit(RVT_R_REWIND_SGE, &qp->r_aflags))
 			qp->r_sge = qp->s_rdma_read_sge;
 		else {
-			ret = qib_get_rwqe(qp, 0);
+			ret = rvt_get_rwqe(qp, false);
 			if (ret < 0)
 				goto op_err;
 			if (!ret)
@@ -401,8 +401,7 @@ last_imm:
 		wc.port_num = 0;
 		/* Signal completion event if the solicited bit is set. */
 		rvt_cq_enter(ibcq_to_rvtcq(qp->ibqp.recv_cq), &wc,
-			     (ohdr->bth[0] &
-				cpu_to_be32(IB_BTH_SOLICITED)) != 0);
+			     ib_bth_is_solicited(ohdr));
 		break;
 
 	case OP(RDMA_WRITE_FIRST):
@@ -472,7 +471,7 @@ rdma_last_imm:
 		if (test_and_clear_bit(RVT_R_REWIND_SGE, &qp->r_aflags))
 			rvt_put_ss(&qp->s_rdma_read_sge);
 		else {
-			ret = qib_get_rwqe(qp, 1);
+			ret = rvt_get_rwqe(qp, true);
 			if (ret < 0)
 				goto op_err;
 			if (!ret)

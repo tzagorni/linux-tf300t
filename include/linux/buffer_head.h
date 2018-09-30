@@ -81,11 +81,14 @@ struct buffer_head {
 /*
  * macro tricks to expand the set_buffer_foo(), clear_buffer_foo()
  * and buffer_foo() functions.
+ * To avoid reset buffer flags that are already set, because that causes
+ * a costly cache line transition, check the flag first.
  */
 #define BUFFER_FNS(bit, name)						\
 static __always_inline void set_buffer_##name(struct buffer_head *bh)	\
 {									\
-	set_bit(BH_##bit, &(bh)->b_state);				\
+	if (!test_bit(BH_##bit, &(bh)->b_state))			\
+		set_bit(BH_##bit, &(bh)->b_state);			\
 }									\
 static __always_inline void clear_buffer_##name(struct buffer_head *bh)	\
 {									\
@@ -202,8 +205,6 @@ void write_boundary_block(struct block_device *bdev,
 			sector_t bblock, unsigned blocksize);
 int bh_uptodate_or_lock(struct buffer_head *bh);
 int bh_submit_read(struct buffer_head *bh);
-loff_t page_cache_seek_hole_data(struct inode *inode, loff_t offset,
-				 loff_t length, int whence);
 
 extern int buffer_heads_over_limit;
 

@@ -73,8 +73,8 @@ enum {
 
 bool tipc_link_create(struct net *net, char *if_name, int bearer_id,
 		      int tolerance, char net_plane, u32 mtu, int priority,
-		      int window, u32 session, u32 ownnode, u32 peer,
-		      u16 peer_caps,
+		      int window, u32 session, u32 ownnode,
+		      u32 peer, u8 *peer_id, u16 peer_caps,
 		      struct tipc_link *bc_sndlink,
 		      struct tipc_link *bc_rcvlink,
 		      struct sk_buff_head *inputq,
@@ -110,6 +110,8 @@ char *tipc_link_name(struct tipc_link *l);
 char tipc_link_plane(struct tipc_link *l);
 int tipc_link_prio(struct tipc_link *l);
 int tipc_link_window(struct tipc_link *l);
+void tipc_link_update_caps(struct tipc_link *l, u16 capabilities);
+bool tipc_link_validate_msg(struct tipc_link *l, struct tipc_msg *hdr);
 unsigned long tipc_link_tolerance(struct tipc_link *l);
 void tipc_link_set_tolerance(struct tipc_link *l, u32 tol,
 			     struct sk_buff_head *xmitq);

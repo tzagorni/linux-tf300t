@@ -20,10 +20,11 @@ Below are the essential guides that every developer should read.
    :maxdepth: 1
 
    howto
-   code-of-conflict
+   code-of-conduct
    development-process
    submitting-patches
    coding-style
+   maintainer-pgp-guide
    email-clients
    kernel-enforcement-statement
    kernel-driver-statement
@@ -51,6 +52,7 @@ lack of a better place.
    adding-syscalls
    magic-number
    volatile-considered-harmful
+   clang-format
 
 .. only::  subproject and html
 

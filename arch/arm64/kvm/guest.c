@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
+#include <kvm/arm_psci.h>
 #include <asm/cputype.h>
 #include <linux/uaccess.h>
 #include <asm/kvm.h>
@@ -106,14 +107,14 @@ static int set_core_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 	}
 
 	if (off == KVM_REG_ARM_CORE_REG(regs.pstate)) {
-		u32 mode = (*(u32 *)valp) & COMPAT_PSR_MODE_MASK;
+		u32 mode = (*(u32 *)valp) & PSR_AA32_MODE_MASK;
 		switch (mode) {
-		case COMPAT_PSR_MODE_USR:
-		case COMPAT_PSR_MODE_FIQ:
-		case COMPAT_PSR_MODE_IRQ:
-		case COMPAT_PSR_MODE_SVC:
-		case COMPAT_PSR_MODE_ABT:
-		case COMPAT_PSR_MODE_UND:
+		case PSR_AA32_MODE_USR:
+		case PSR_AA32_MODE_FIQ:
+		case PSR_AA32_MODE_IRQ:
+		case PSR_AA32_MODE_SVC:
+		case PSR_AA32_MODE_ABT:
+		case PSR_AA32_MODE_UND:
 		case PSR_MODE_EL0t:
 		case PSR_MODE_EL1t:
 		case PSR_MODE_EL1h:
@@ -205,7 +206,7 @@ static int get_timer_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 unsigned long kvm_arm_num_regs(struct kvm_vcpu *vcpu)
 {
 	return num_core_regs() + kvm_arm_num_sys_reg_descs(vcpu)
-                + NUM_TIMER_REGS;
+		+ kvm_arm_get_fw_num_regs(vcpu)	+ NUM_TIMER_REGS;
 }
 
 /**
@@ -225,6 +226,11 @@ int kvm_arm_copy_reg_indices(struct kvm_vcpu *vcpu, u64 __user *uindices)
 		uindices++;
 	}
 
+	ret = kvm_arm_copy_fw_reg_indices(vcpu, uindices);
+	if (ret)
+		return ret;
+	uindices += kvm_arm_get_fw_num_regs(vcpu);
+
 	ret = copy_timer_indices(vcpu, uindices);
 	if (ret)
 		return ret;
@@ -243,6 +249,9 @@ int kvm_arm_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 	if ((reg->id & KVM_REG_ARM_COPROC_MASK) == KVM_REG_ARM_CORE)
 		return get_core_reg(vcpu, reg);
 
+	if ((reg->id & KVM_REG_ARM_COPROC_MASK) == KVM_REG_ARM_FW)
+		return kvm_arm_get_fw_reg(vcpu, reg);
+
 	if (is_timer_reg(reg->id))
 		return get_timer_reg(vcpu, reg);
 
@@ -258,6 +267,9 @@ int kvm_arm_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
 	/* Register group 16 means we set a core register. */
 	if ((reg->id & KVM_REG_ARM_COPROC_MASK) == KVM_REG_ARM_CORE)
 		return set_core_reg(vcpu, reg);
+
+	if ((reg->id & KVM_REG_ARM_COPROC_MASK) == KVM_REG_ARM_FW)
+		return kvm_arm_set_fw_reg(vcpu, reg);
 
 	if (is_timer_reg(reg->id))
 		return set_timer_reg(vcpu, reg);
@@ -275,6 +287,39 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 				  struct kvm_sregs *sregs)
 {
 	return -EINVAL;
+}
+
+int __kvm_arm_vcpu_get_events(struct kvm_vcpu *vcpu,
+			      struct kvm_vcpu_events *events)
+{
+	events->exception.serror_pending = !!(vcpu->arch.hcr_el2 & HCR_VSE);
+	events->exception.serror_has_esr = cpus_have_const_cap(ARM64_HAS_RAS_EXTN);
+
+	if (events->exception.serror_pending && events->exception.serror_has_esr)
+		events->exception.serror_esr = vcpu_get_vsesr(vcpu);
+
+	return 0;
+}
+
+int __kvm_arm_vcpu_set_events(struct kvm_vcpu *vcpu,
+			      struct kvm_vcpu_events *events)
+{
+	bool serror_pending = events->exception.serror_pending;
+	bool has_esr = events->exception.serror_has_esr;
+
+	if (serror_pending && has_esr) {
+		if (!cpus_have_const_cap(ARM64_HAS_RAS_EXTN))
+			return -EINVAL;
+
+		if (!((events->exception.serror_esr) & ~ESR_ELx_ISS_MASK))
+			kvm_set_sei_esr(vcpu, events->exception.serror_esr);
+		else
+			return -EINVAL;
+	} else if (serror_pending) {
+		kvm_inject_vabt(vcpu);
+	}
+
+	return 0;
 }
 
 int __attribute_const__ kvm_target_cpu(void)
@@ -361,10 +406,14 @@ int kvm_arch_vcpu_ioctl_translate(struct kvm_vcpu *vcpu,
 int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 					struct kvm_guest_debug *dbg)
 {
+	int ret = 0;
+
 	trace_kvm_set_guest_debug(vcpu, dbg->control);
 
-	if (dbg->control & ~KVM_GUESTDBG_VALID_MASK)
-		return -EINVAL;
+	if (dbg->control & ~KVM_GUESTDBG_VALID_MASK) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	if (dbg->control & KVM_GUESTDBG_ENABLE) {
 		vcpu->guest_debug = dbg->control;
@@ -378,7 +427,9 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 		/* If not enabled clear all flags */
 		vcpu->guest_debug = 0;
 	}
-	return 0;
+
+out:
+	return ret;
 }
 
 int kvm_arm_vcpu_arch_set_attr(struct kvm_vcpu *vcpu,

@@ -29,6 +29,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
+#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
@@ -1821,11 +1822,11 @@ static __poll_t mpeg_poll(struct file *file,
 	__poll_t res = 0;
 
 	if (v4l2_event_pending(&fh->fh))
-		res |= POLLPRI;
+		res |= EPOLLPRI;
 	else
 		poll_wait(file, &fh->fh.wait, wait);
 
-	if (!(req_events & (POLLIN | POLLRDNORM)))
+	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
 		return res;
 
 	mutex_lock(&dev->lock);

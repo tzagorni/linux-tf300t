@@ -32,7 +32,6 @@
 #include <linux/aer.h>
 #include <linux/wait.h>
 #include <linux/stringify.h>
-#include <linux/slab_def.h>
 #include <scsi/scsi.h>
 #include <scsi/sg.h>
 #include <linux/io.h>
@@ -658,8 +657,8 @@ static bool skd_preop_sg_list(struct skd_device *skdev,
 
 	if (unlikely(skdev->dbg_level > 1)) {
 		dev_dbg(&skdev->pdev->dev,
-			"skreq=%x sksg_list=%p sksg_dma=%llx\n",
-			skreq->id, skreq->sksg_list, skreq->sksg_dma_address);
+			"skreq=%x sksg_list=%p sksg_dma=%pad\n",
+			skreq->id, skreq->sksg_list, &skreq->sksg_dma_address);
 		for (i = 0; i < n_sg; i++) {
 			struct fit_sg_descriptor *sgd = &skreq->sksg_list[i];
 
@@ -1191,8 +1190,8 @@ static void skd_send_fitmsg(struct skd_device *skdev,
 {
 	u64 qcmd;
 
-	dev_dbg(&skdev->pdev->dev, "dma address 0x%llx, busy=%d\n",
-		skmsg->mb_dma_address, skd_in_flight(skdev));
+	dev_dbg(&skdev->pdev->dev, "dma address %pad, busy=%d\n",
+		&skmsg->mb_dma_address, skd_in_flight(skdev));
 	dev_dbg(&skdev->pdev->dev, "msg_buf %p\n", skmsg->msg_buf);
 
 	qcmd = skmsg->mb_dma_address;
@@ -1251,9 +1250,9 @@ static void skd_send_special_fitmsg(struct skd_device *skdev,
 		}
 
 		dev_dbg(&skdev->pdev->dev,
-			"skspcl=%p id=%04x sksg_list=%p sksg_dma=%llx\n",
+			"skspcl=%p id=%04x sksg_list=%p sksg_dma=%pad\n",
 			skspcl, skspcl->req.id, skspcl->req.sksg_list,
-			skspcl->req.sksg_dma_address);
+			&skspcl->req.sksg_dma_address);
 		for (i = 0; i < skspcl->req.n_sg; i++) {
 			struct fit_sg_descriptor *sgd =
 				&skspcl->req.sksg_list[i];
@@ -2603,7 +2602,8 @@ static void *skd_alloc_dma(struct skd_device *skdev, struct kmem_cache *s,
 	buf = kmem_cache_alloc(s, gfp);
 	if (!buf)
 		return NULL;
-	*dma_handle = dma_map_single(dev, buf, s->size, dir);
+	*dma_handle = dma_map_single(dev, buf,
+				     kmem_cache_size(s), dir);
 	if (dma_mapping_error(dev, *dma_handle)) {
 		kmem_cache_free(s, buf);
 		buf = NULL;
@@ -2618,7 +2618,8 @@ static void skd_free_dma(struct skd_device *skdev, struct kmem_cache *s,
 	if (!vaddr)
 		return;
 
-	dma_unmap_single(&skdev->pdev->dev, dma_handle, s->size, dir);
+	dma_unmap_single(&skdev->pdev->dev, dma_handle,
+			 kmem_cache_size(s), dir);
 	kmem_cache_free(s, vaddr);
 }
 
@@ -2684,8 +2685,8 @@ static int skd_cons_skmsg(struct skd_device *skdev)
 
 		WARN(((uintptr_t)skmsg->msg_buf | skmsg->mb_dma_address) &
 		     (FIT_QCMD_ALIGN - 1),
-		     "not aligned: msg_buf %p mb_dma_address %#llx\n",
-		     skmsg->msg_buf, skmsg->mb_dma_address);
+		     "not aligned: msg_buf %p mb_dma_address %pad\n",
+		     skmsg->msg_buf, &skmsg->mb_dma_address);
 		memset(skmsg->msg_buf, 0, SKD_N_FITMSG_BYTES);
 	}
 
@@ -2857,8 +2858,8 @@ static int skd_cons_disk(struct skd_device *skdev)
 	/* set optimal I/O size to 8KB */
 	blk_queue_io_opt(q, 8192);
 
-	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);
-	queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, q);
+	blk_queue_flag_set(QUEUE_FLAG_NONROT, q);
+	blk_queue_flag_clear(QUEUE_FLAG_ADD_RANDOM, q);
 
 	blk_queue_rq_timeout(q, 8 * HZ);
 

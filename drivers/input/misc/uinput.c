@@ -410,7 +410,7 @@ static int uinput_validate_absinfo(struct input_dev *dev, unsigned int code,
 	min = abs->minimum;
 	max = abs->maximum;
 
-	if ((min != 0 || max != 0) && max <= min) {
+	if ((min != 0 || max != 0) && max < min) {
 		printk(KERN_DEBUG
 		       "%s: invalid abs[%02x] min:%d max:%d\n",
 		       UINPUT_NAME, code, min, max);
@@ -704,7 +704,7 @@ static __poll_t uinput_poll(struct file *file, poll_table *wait)
 	poll_wait(file, &udev->waitq, wait);
 
 	if (udev->head != udev->tail)
-		return POLLIN | POLLRDNORM;
+		return EPOLLIN | EPOLLRDNORM;
 
 	return 0;
 }

@@ -21,7 +21,7 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 #define unlikely_notrace(x)	__builtin_expect(!!(x), 0)
 
 #define __branch_check__(x, expect, is_constant) ({			\
-			int ______r;					\
+			long ______r;					\
 			static struct ftrace_likely_data		\
 				__attribute__((__aligned__(4)))		\
 				__attribute__((section("_ftrace_annotated_branch"))) \
@@ -84,6 +84,11 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 
 #ifndef barrier_data
 # define barrier_data(ptr) barrier()
+#endif
+
+/* workaround for GCC PR82365 if needed */
+#ifndef barrier_before_unreachable
+# define barrier_before_unreachable() do { } while (0)
 #endif
 
 /* Unreachable code */
@@ -275,7 +280,30 @@ unsigned long read_word_at_a_time(const void *addr)
 
 #endif /* __KERNEL__ */
 
+/*
+ * Force the compiler to emit 'sym' as a symbol, so that we can reference
+ * it from inline assembler. Necessary in case 'sym' could be inlined
+ * otherwise, or eliminated entirely due to lack of references that are
+ * visible to the compiler.
+ */
+#define __ADDRESSABLE(sym) \
+	static void * __attribute__((section(".discard.addressable"), used)) \
+		__PASTE(__addressable_##sym, __LINE__) = (void *)&sym;
+
+/**
+ * offset_to_ptr - convert a relative memory offset to an absolute pointer
+ * @off:	the address of the 32-bit offset value
+ */
+static inline void *offset_to_ptr(const int *off)
+{
+	return (void *)((unsigned long)off + *off);
+}
+
 #endif /* __ASSEMBLY__ */
+
+#ifndef __optimize
+# define __optimize(level)
+#endif
 
 /* Compile time object size, -1 for unknown */
 #ifndef __compiletime_object_size
@@ -304,7 +332,7 @@ unsigned long read_word_at_a_time(const void *addr)
 #ifdef __OPTIMIZE__
 # define __compiletime_assert(condition, msg, prefix, suffix)		\
 	do {								\
-		bool __cond = !(condition);				\
+		int __cond = !(condition);				\
 		extern void prefix ## suffix(void) __compiletime_error(msg); \
 		if (__cond)						\
 			prefix ## suffix();				\

@@ -26,6 +26,7 @@
 #include <linux/if_pppox.h>
 #include <linux/ppp_defs.h>
 #include <linux/netfilter_bridge.h>
+#include <uapi/linux/netfilter_bridge.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
 #include <linux/netfilter_arp.h>
@@ -214,7 +215,7 @@ static int br_validate_ipv4(struct net *net, struct sk_buff *skb)
 
 	iph = ip_hdr(skb);
 	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
-		goto inhdr_error;
+		goto csum_error;
 
 	len = ntohs(iph->tot_len);
 	if (skb->len < len) {
@@ -236,6 +237,8 @@ static int br_validate_ipv4(struct net *net, struct sk_buff *skb)
 	 */
 	return 0;
 
+csum_error:
+	__IP_INC_STATS(net, IPSTATS_MIB_CSUMERRORS);
 inhdr_error:
 	__IP_INC_STATS(net, IPSTATS_MIB_INHDRERRORS);
 drop:

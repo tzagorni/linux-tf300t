@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * PCI Hot Plug Controller Driver for RPA-compliant PPC64 platform.
  * Copyright (C) 2003 Linda Xie <lxie@us.ibm.com>
  *
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Send feedback to <lxie@us.ibm.com>
  *
@@ -418,13 +404,13 @@ static void __exit cleanup_slots(void)
 	/*
 	 * Unregister all of our slots with the pci_hotplug subsystem,
 	 * and free up all memory that we had allocated.
-	 * memory will be freed in release_slot callback.
 	 */
 
 	list_for_each_entry_safe(slot, next, &rpaphp_slot_head,
 				 rpaphp_slot_list) {
 		list_del(&slot->rpaphp_slot_list);
 		pci_hp_deregister(slot->hotplug_slot);
+		dealloc_slot_struct(slot);
 	}
 	return;
 }

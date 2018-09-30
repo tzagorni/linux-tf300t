@@ -154,6 +154,10 @@ static void v4l2_fwnode_endpoint_parse_parallel_bus(
 		flags |= v ? V4L2_MBUS_VIDEO_SOG_ACTIVE_HIGH :
 			V4L2_MBUS_VIDEO_SOG_ACTIVE_LOW;
 
+	if (!fwnode_property_read_u32(fwnode, "data-enable-active", &v))
+		flags |= v ? V4L2_MBUS_DATA_ENABLE_HIGH :
+			V4L2_MBUS_DATA_ENABLE_LOW;
+
 	bus->flags = flags;
 
 }
@@ -359,9 +363,9 @@ static int v4l2_async_notifier_fwnode_parse_endpoint(
 		return -ENOMEM;
 
 	asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
-	asd->match.fwnode.fwnode =
+	asd->match.fwnode =
 		fwnode_graph_get_remote_port_parent(endpoint);
-	if (!asd->match.fwnode.fwnode) {
+	if (!asd->match.fwnode) {
 		dev_warn(dev, "bad remote port parent\n");
 		ret = -EINVAL;
 		goto out_err;
@@ -393,7 +397,7 @@ static int v4l2_async_notifier_fwnode_parse_endpoint(
 	return 0;
 
 out_err:
-	fwnode_handle_put(asd->match.fwnode.fwnode);
+	fwnode_handle_put(asd->match.fwnode);
 	kfree(asd);
 
 	return ret == -ENOTCONN ? 0 : ret;
@@ -566,7 +570,7 @@ static int v4l2_fwnode_reference_parse(
 		}
 
 		notifier->subdevs[notifier->num_subdevs] = asd;
-		asd->match.fwnode.fwnode = args.fwnode;
+		asd->match.fwnode = args.fwnode;
 		asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
 		notifier->num_subdevs++;
 	}
@@ -739,7 +743,7 @@ static struct fwnode_handle *v4l2_fwnode_reference_get_int_prop(
 	const char * const *props, unsigned int nprops)
 {
 	struct fwnode_reference_args fwnode_args;
-	unsigned int *args = fwnode_args.args;
+	u64 *args = fwnode_args.args;
 	struct fwnode_handle *child;
 	int ret;
 
@@ -819,17 +823,25 @@ static int v4l2_fwnode_reference_parse_int_props(
 	unsigned int index;
 	int ret;
 
-	for (index = 0; !IS_ERR((fwnode = v4l2_fwnode_reference_get_int_prop(
-					 dev_fwnode(dev), prop, index, props,
-					 nprops))); index++)
+	index = 0;
+	do {
+		fwnode = v4l2_fwnode_reference_get_int_prop(dev_fwnode(dev),
+							    prop, index,
+							    props, nprops);
+		if (IS_ERR(fwnode)) {
+			/*
+			 * Note that right now both -ENODATA and -ENOENT may
+			 * signal out-of-bounds access. Return the error in
+			 * cases other than that.
+			 */
+			if (PTR_ERR(fwnode) != -ENOENT &&
+			    PTR_ERR(fwnode) != -ENODATA)
+				return PTR_ERR(fwnode);
+			break;
+		}
 		fwnode_handle_put(fwnode);
-
-	/*
-	 * Note that right now both -ENODATA and -ENOENT may signal
-	 * out-of-bounds access. Return the error in cases other than that.
-	 */
-	if (PTR_ERR(fwnode) != -ENOENT && PTR_ERR(fwnode) != -ENODATA)
-		return PTR_ERR(fwnode);
+		index++;
+	} while (1);
 
 	ret = v4l2_async_notifier_realloc(notifier,
 					  notifier->num_subdevs + index);
@@ -853,7 +865,7 @@ static int v4l2_fwnode_reference_parse_int_props(
 		}
 
 		notifier->subdevs[notifier->num_subdevs] = asd;
-		asd->match.fwnode.fwnode = fwnode;
+		asd->match.fwnode = fwnode;
 		asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
 		notifier->num_subdevs++;
 	}

@@ -445,7 +445,7 @@ static ssize_t hung_up_tty_write(struct file *file, const char __user *buf,
 /* No kernel lock held - none needed ;) */
 static __poll_t hung_up_tty_poll(struct file *filp, poll_table *wait)
 {
-	return POLLIN | POLLOUT | POLLERR | POLLHUP | POLLRDNORM | POLLWRNORM;
+	return EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP | EPOLLRDNORM | EPOLLWRNORM;
 }
 
 static long hung_up_tty_ioctl(struct file *file, unsigned int cmd,
@@ -533,7 +533,7 @@ void tty_wakeup(struct tty_struct *tty)
 			tty_ldisc_deref(ld);
 		}
 	}
-	wake_up_interruptible_poll(&tty->write_wait, POLLOUT);
+	wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT);
 }
 
 EXPORT_SYMBOL_GPL(tty_wakeup);
@@ -585,6 +585,14 @@ static void __tty_hangup(struct tty_struct *tty, int exit_session)
 		tty_unlock(tty);
 		return;
 	}
+
+	/*
+	 * Some console devices aren't actually hung up for technical and
+	 * historical reasons, which can lead to indefinite interruptible
+	 * sleep in n_tty_read().  The following explicitly tells
+	 * n_tty_read() to abort readers.
+	 */
+	set_bit(TTY_HUPPING, &tty->flags);
 
 	/* inuse_filps is protected by the single tty lock,
 	   this really needs to change if we want to flush the
@@ -640,6 +648,7 @@ static void __tty_hangup(struct tty_struct *tty, int exit_session)
 	 * from the ldisc side, which is now guaranteed.
 	 */
 	set_bit(TTY_HUPPED, &tty->flags);
+	clear_bit(TTY_HUPPING, &tty->flags);
 	tty_unlock(tty);
 
 	if (f)
@@ -805,9 +814,9 @@ void start_tty(struct tty_struct *tty)
 }
 EXPORT_SYMBOL(start_tty);
 
-static void tty_update_time(struct timespec *time)
+static void tty_update_time(struct timespec64 *time)
 {
-	unsigned long sec = get_seconds();
+	time64_t sec = ktime_get_real_seconds();
 
 	/*
 	 * We only care if the two values differ in anything other than the
@@ -867,7 +876,7 @@ static ssize_t tty_read(struct file *file, char __user *buf, size_t count,
 static void tty_write_unlock(struct tty_struct *tty)
 {
 	mutex_unlock(&tty->atomic_write_lock);
-	wake_up_interruptible_poll(&tty->write_wait, POLLOUT);
+	wake_up_interruptible_poll(&tty->write_wait, EPOLLOUT);
 }
 
 static int tty_write_lock(struct tty_struct *tty, int ndelay)
@@ -1246,6 +1255,7 @@ static void tty_driver_remove_tty(struct tty_driver *driver, struct tty_struct *
 static int tty_reopen(struct tty_struct *tty)
 {
 	struct tty_driver *driver = tty->driver;
+	int retval;
 
 	if (driver->type == TTY_DRIVER_TYPE_PTY &&
 	    driver->subtype == PTY_TYPE_MASTER)
@@ -1259,10 +1269,14 @@ static int tty_reopen(struct tty_struct *tty)
 
 	tty->count++;
 
-	if (!tty->ldisc)
-		return tty_ldisc_reinit(tty, tty->termios.c_line);
+	if (tty->ldisc)
+		return 0;
 
-	return 0;
+	retval = tty_ldisc_reinit(tty, tty->termios.c_line);
+	if (retval)
+		tty->count--;
+
+	return retval;
 }
 
 /**
@@ -1667,21 +1681,21 @@ int tty_release(struct inode *inode, struct file *filp)
 
 		if (tty->count <= 1) {
 			if (waitqueue_active(&tty->read_wait)) {
-				wake_up_poll(&tty->read_wait, POLLIN);
+				wake_up_poll(&tty->read_wait, EPOLLIN);
 				do_sleep++;
 			}
 			if (waitqueue_active(&tty->write_wait)) {
-				wake_up_poll(&tty->write_wait, POLLOUT);
+				wake_up_poll(&tty->write_wait, EPOLLOUT);
 				do_sleep++;
 			}
 		}
 		if (o_tty && o_tty->count <= 1) {
 			if (waitqueue_active(&o_tty->read_wait)) {
-				wake_up_poll(&o_tty->read_wait, POLLIN);
+				wake_up_poll(&o_tty->read_wait, EPOLLIN);
 				do_sleep++;
 			}
 			if (waitqueue_active(&o_tty->write_wait)) {
-				wake_up_poll(&o_tty->write_wait, POLLOUT);
+				wake_up_poll(&o_tty->write_wait, EPOLLOUT);
 				do_sleep++;
 			}
 		}
@@ -2104,7 +2118,7 @@ static int __tty_fasync(int fd, struct file *filp, int on)
 			type = PIDTYPE_PGID;
 		} else {
 			pid = task_pid(current);
-			type = PIDTYPE_PID;
+			type = PIDTYPE_TGID;
 		}
 		get_pid(pid);
 		spin_unlock_irqrestore(&tty->ctrl_lock, flags);
@@ -2807,7 +2821,10 @@ struct tty_struct *alloc_tty_struct(struct tty_driver *driver, int idx)
 
 	kref_init(&tty->kref);
 	tty->magic = TTY_MAGIC;
-	tty_ldisc_init(tty);
+	if (tty_ldisc_init(tty)) {
+		kfree(tty);
+		return NULL;
+	}
 	tty->session = NULL;
 	tty->pgrp = NULL;
 	mutex_init(&tty->legacy_mutex);

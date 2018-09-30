@@ -66,8 +66,7 @@ static int xfrm_output_one(struct sk_buff *skb, int err)
 			goto error_nolock;
 		}
 
-		if (x->props.output_mark)
-			skb->mark = x->props.output_mark;
+		skb->mark = xfrm_smark_get(skb->mark, x);
 
 		err = x->outer_mode->output(x, skb);
 		if (err) {
@@ -285,8 +284,9 @@ void xfrm_local_error(struct sk_buff *skb, int mtu)
 		return;
 
 	afinfo = xfrm_state_get_afinfo(proto);
-	if (afinfo)
+	if (afinfo) {
 		afinfo->local_error(skb, mtu);
-	rcu_read_unlock();
+		rcu_read_unlock();
+	}
 }
 EXPORT_SYMBOL_GPL(xfrm_local_error);

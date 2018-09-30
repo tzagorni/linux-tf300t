@@ -496,7 +496,7 @@ next_subpacket:
 			return rxrpc_proto_abort("LSA", call, seq);
 	}
 
-	trace_rxrpc_rx_data(call, seq, serial, flags, annotation);
+	trace_rxrpc_rx_data(call->debug_id, seq, serial, flags, annotation);
 	if (before_eq(seq, hard_ack)) {
 		ack = RXRPC_ACK_DUPLICATE;
 		ack_serial = serial;
@@ -592,9 +592,15 @@ ack:
 		rxrpc_propose_ACK(call, ack, skew, ack_serial,
 				  immediate_ack, true,
 				  rxrpc_propose_ack_input_data);
+	else
+		rxrpc_propose_ACK(call, RXRPC_ACK_DELAY, skew, serial,
+				  false, true,
+				  rxrpc_propose_ack_input_data);
 
-	if (sp->hdr.seq == READ_ONCE(call->rx_hard_ack) + 1)
+	if (sp->hdr.seq == READ_ONCE(call->rx_hard_ack) + 1) {
+		trace_rxrpc_notify_socket(call->debug_id, serial);
 		rxrpc_notify_socket(call);
+	}
 	_leave(" [queued]");
 }
 
@@ -971,7 +977,7 @@ static void rxrpc_input_call_packet(struct rxrpc_call *call,
 	if (timo) {
 		unsigned long now = jiffies, expect_rx_by;
 
-		expect_rx_by = jiffies + timo;
+		expect_rx_by = now + timo;
 		WRITE_ONCE(call->expect_rx_by, expect_rx_by);
 		rxrpc_reduce_call_timer(call, expect_rx_by, now,
 					rxrpc_timer_set_for_normal);
@@ -1183,6 +1189,8 @@ void rxrpc_data_ready(struct sock *udp_sk)
 
 	switch (sp->hdr.type) {
 	case RXRPC_PACKET_TYPE_VERSION:
+		if (!(sp->hdr.flags & RXRPC_CLIENT_INITIATED))
+			goto discard;
 		rxrpc_post_packet_to_local(local, skb);
 		goto out;
 
@@ -1198,6 +1206,12 @@ void rxrpc_data_ready(struct sock *udp_sk)
 		    !rxrpc_validate_jumbo(skb))
 			goto bad_message;
 		break;
+
+		/* Packet types 9-11 should just be ignored. */
+	case RXRPC_PACKET_TYPE_PARAMS:
+	case RXRPC_PACKET_TYPE_10:
+	case RXRPC_PACKET_TYPE_11:
+		goto discard;
 	}
 
 	rcu_read_lock();
@@ -1240,17 +1254,25 @@ void rxrpc_data_ready(struct sock *udp_sk)
 			goto discard_unlock;
 
 		if (sp->hdr.callNumber == chan->last_call) {
-			/* For the previous service call, if completed successfully, we
-			 * discard all further packets.
-			 */
-			if (rxrpc_conn_is_service(conn) &&
-			    (chan->last_type == RXRPC_PACKET_TYPE_ACK ||
-			     sp->hdr.type == RXRPC_PACKET_TYPE_ABORT))
+			if (chan->call ||
+			    sp->hdr.type == RXRPC_PACKET_TYPE_ABORT)
 				goto discard_unlock;
 
-			/* But otherwise we need to retransmit the final packet from
-			 * data cached in the connection record.
+			/* For the previous service call, if completed
+			 * successfully, we discard all further packets.
 			 */
+			if (rxrpc_conn_is_service(conn) &&
+			    chan->last_type == RXRPC_PACKET_TYPE_ACK)
+				goto discard_unlock;
+
+			/* But otherwise we need to retransmit the final packet
+			 * from data cached in the connection record.
+			 */
+			if (sp->hdr.type == RXRPC_PACKET_TYPE_DATA)
+				trace_rxrpc_rx_data(chan->call_debug_id,
+						    sp->hdr.seq,
+						    sp->hdr.serial,
+						    sp->hdr.flags, 0);
 			rxrpc_post_packet_to_conn(conn, skb);
 			goto out_unlock;
 		}
@@ -1267,8 +1289,14 @@ void rxrpc_data_ready(struct sock *udp_sk)
 			call = NULL;
 		}
 
-		if (call && sp->hdr.serviceId != call->service_id)
-			call->service_id = sp->hdr.serviceId;
+		if (call) {
+			if (sp->hdr.serviceId != call->service_id)
+				call->service_id = sp->hdr.serviceId;
+			if ((int)sp->hdr.serial - (int)call->rx_serial > 0)
+				call->rx_serial = sp->hdr.serial;
+			if (!test_bit(RXRPC_CALL_RX_HEARD, &call->flags))
+				set_bit(RXRPC_CALL_RX_HEARD, &call->flags);
+		}
 	} else {
 		skew = 0;
 		call = NULL;
@@ -1307,21 +1335,21 @@ out_unlock:
 
 wrong_security:
 	rcu_read_unlock();
-	trace_rxrpc_abort("SEC", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
+	trace_rxrpc_abort(0, "SEC", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
 			  RXKADINCONSISTENCY, EBADMSG);
 	skb->priority = RXKADINCONSISTENCY;
 	goto post_abort;
 
 reupgrade:
 	rcu_read_unlock();
-	trace_rxrpc_abort("UPG", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
+	trace_rxrpc_abort(0, "UPG", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
 			  RX_PROTOCOL_ERROR, EBADMSG);
 	goto protocol_error;
 
 bad_message_unlock:
 	rcu_read_unlock();
 bad_message:
-	trace_rxrpc_abort("BAD", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
+	trace_rxrpc_abort(0, "BAD", sp->hdr.cid, sp->hdr.callNumber, sp->hdr.seq,
 			  RX_PROTOCOL_ERROR, EBADMSG);
 protocol_error:
 	skb->priority = RX_PROTOCOL_ERROR;

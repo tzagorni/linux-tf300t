@@ -89,6 +89,7 @@ int ptp_set_pinfunc(struct ptp_clock *ptp, unsigned int pin,
 	case PTP_PF_PHYSYNC:
 		if (chan != 0)
 			return -EINVAL;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -221,7 +222,7 @@ long ptp_ioctl(struct posix_clock *pc, unsigned int cmd, unsigned long arg)
 		}
 		pct = &sysoff->ts[0];
 		for (i = 0; i < sysoff->n_samples; i++) {
-			getnstimeofday64(&ts);
+			ktime_get_real_ts64(&ts);
 			pct->sec = ts.tv_sec;
 			pct->nsec = ts.tv_nsec;
 			pct++;
@@ -230,7 +231,7 @@ long ptp_ioctl(struct posix_clock *pc, unsigned int cmd, unsigned long arg)
 			pct->nsec = ts.tv_nsec;
 			pct++;
 		}
-		getnstimeofday64(&ts);
+		ktime_get_real_ts64(&ts);
 		pct->sec = ts.tv_sec;
 		pct->nsec = ts.tv_nsec;
 		if (copy_to_user((void __user *)arg, sysoff, sizeof(*sysoff)))
@@ -286,7 +287,7 @@ __poll_t ptp_poll(struct posix_clock *pc, struct file *fp, poll_table *wait)
 
 	poll_wait(fp, &ptp->tsev_wq, wait);
 
-	return queue_cnt(&ptp->tsevq) ? POLLIN : 0;
+	return queue_cnt(&ptp->tsevq) ? EPOLLIN : 0;
 }
 
 #define EXTTS_BUFSIZE (PTP_BUF_TIMESTAMPS * sizeof(struct ptp_extts_event))

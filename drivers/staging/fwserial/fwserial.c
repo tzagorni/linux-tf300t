@@ -37,7 +37,7 @@ module_param_named(loop, create_loop_dev, bool, 0644);
 /*
  * Threshold below which the tty is woken for writing
  * - should be equal to WAKEUP_CHARS in drivers/tty/n_tty.c because
- *   even if the writer is woken, n_tty_poll() won't set POLLOUT until
+ *   even if the writer is woken, n_tty_poll() won't set EPOLLOUT until
  *   our fifo is below this level
  */
 #define WAKEUP_CHARS             256
@@ -1506,11 +1506,6 @@ static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int fwtty_proc_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_proc_show, NULL);
-}
-
 static int fwtty_stats_open(struct inode *inode, struct file *fp)
 {
 	return single_open(fp, fwtty_debugfs_stats_show, inode->i_private);
@@ -1535,14 +1530,6 @@ static const struct file_operations fwtty_peers_fops = {
 	.read =		seq_read,
 	.llseek =	seq_lseek,
 	.release =	single_release,
-};
-
-static const struct file_operations fwtty_proc_fops = {
-	.owner =        THIS_MODULE,
-	.open =         fwtty_proc_open,
-	.read =         seq_read,
-	.llseek =       seq_lseek,
-	.release =      single_release,
 };
 
 static const struct tty_port_operations fwtty_port_ops = {
@@ -1570,7 +1557,7 @@ static const struct tty_operations fwtty_ops = {
 	.tiocmget =		fwtty_tiocmget,
 	.tiocmset =		fwtty_tiocmset,
 	.get_icount =		fwtty_get_icount,
-	.proc_fops =		&fwtty_proc_fops,
+	.proc_show =		fwtty_proc_show,
 };
 
 static const struct tty_operations fwloop_ops = {
