@@ -39,6 +39,7 @@ static int gr2d_init(struct host1x_client *client)
 	struct tegra_drm_client *drm = host1x_to_drm_client(client);
 	struct drm_device *dev = dev_get_drvdata(client->parent);
 	unsigned long flags = HOST1X_SYNCPT_HAS_BASE;
+	struct tegra_drm *tegra = dev->dev_private;
 	struct gr2d *gr2d = to_gr2d(drm);
 	int err;
 
@@ -53,14 +54,22 @@ static int gr2d_init(struct host1x_client *client)
 		goto put;
 	}
 
-	gr2d->group = host1x_client_iommu_attach(client, false);
-	if (IS_ERR(gr2d->group)) {
-		err = PTR_ERR(gr2d->group);
-		dev_err(client->dev, "failed to attach to domain: %d\n", err);
-		goto free;
+	if (tegra->domain) {
+		gr2d->group = iommu_group_get(client->dev);
+
+		if (gr2d->group) {
+			err = iommu_attach_group(tegra->domain, gr2d->group);
+			if (err < 0) {
+				dev_err(client->dev,
+					"failed to attach to domain: %d\n",
+					err);
+				iommu_group_put(gr2d->group);
+				goto free;
+			}
+		}
 	}
 
-	err = tegra_drm_register_client(dev->dev_private, drm);
+	err = tegra_drm_register_client(tegra, drm);
 	if (err < 0) {
 		dev_err(client->dev, "failed to register client: %d\n", err);
 		goto detach;
@@ -69,7 +78,10 @@ static int gr2d_init(struct host1x_client *client)
 	return 0;
 
 detach:
-	host1x_client_iommu_detach(client, gr2d->group);
+	if (gr2d->group) {
+		iommu_detach_group(tegra->domain, gr2d->group);
+		iommu_group_put(gr2d->group);
+	}
 free:
 	host1x_syncpt_free(client->syncpts[0]);
 put:
@@ -89,9 +101,13 @@ static int gr2d_exit(struct host1x_client *client)
 	if (err < 0)
 		return err;
 
-	host1x_client_iommu_detach(client, gr2d->group);
 	host1x_syncpt_free(client->syncpts[0]);
 	host1x_channel_put(gr2d->channel);
+
+	if (gr2d->group) {
+		iommu_detach_group(tegra->domain, gr2d->group);
+		iommu_group_put(gr2d->group);
+	}
 
 	return 0;
 }
